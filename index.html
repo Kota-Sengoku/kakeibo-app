@@ -642,6 +642,7 @@ function render(){
   else if(p==='stats') body = viewStats(txs,a||'month');
   else if(p==='sync') body = viewSync(txs);
   else body = viewCal(txs);
+  if(blocked()){ app.innerHTML = viewBlocked(); return; }      // 重大な更新が必要なときは、更新するまで、この画面だけ
   if(p==='setup' || needSetup()){ app.innerHTML = viewSetup(); return; }      // #/setup は、いつでも、はじめての設定の画面を見られる(確認用)
   const items = [['cal','カレンダー','cal','#/'],['history','履歴','list','#/history'],['stats','レポート','chart','#/stats/month'],['sync','設定','gear','#/sync']];
   const on = k => p===k||(p==='day'&&k==='cal');
@@ -1333,6 +1334,24 @@ function viewSubs(txs){
 }
 
 const op = k => (S.setOpen && S.setOpen[k]) ? 'open' : '';
+/* ========= 重大な更新のお知らせ(更新するまで、使えない画面) ========= */
+function viewBlocked(){
+  const ol = 'style="margin:8px 0 0;padding-left:20px;line-height:1.9"';
+  return `<div style="max-width:560px;width:100%;box-sizing:border-box;margin:0 auto;padding:0 16px 40px">
+  <h1 class="h1" style="margin:24px 0 6px">安全のための更新が必要です</h1>
+  <div class="sub" style="margin-bottom:14px">${esc((RELEASE&&RELEASE.blockMessage)||'重要な安全の修正が出ました。更新するまで、データの送受信を止めています(データは、消えていません)。')}</div>
+  <div class="card" id="blk-msg"><b>更新の手順(約3分)</b>
+    <ol ${ol}>
+      <li><button class="btn ghost sm" data-act="setup-copycode">プログラムをコピー</button></li>
+      <li>Cloudflareの Workers & Pages → あなたのWorker(例 <b>kakeibo-app</b>)→ 右上の「<b>Edit code</b>」</li>
+      <li>左のコードを全部消して、貼り付けて、右上の「<b>Deploy</b>」を押す</li>
+      <li>ここにもどって、<button class="btn" data-act="cloud-info">更新できたか確認</button> を押す</li>
+    </ol>
+    <div class="sub" style="margin-top:10px">いまの版: ${cloudInfo?(cloudInfo.version||1):'?'} / 必要な版: ${RELEASE&&RELEASE.workerBlock}</div></div>
+  <div class="sub" style="margin-top:12px">Cloudflareの画面が編集できないときは、「Visit」の下の「Deployments」から、新しい版を作る方法もあります。困ったときは、このアプリを配った人に、聞いてください。</div>
+  </div>`;
+}
+
 /* ========= はじめての設定(新しく使う人向け) ========= */
 const SHORTCUT_URL = 'https://www.icloud.com/shortcuts/3aa6b59585224ba4aaa7db0de51605cf';     // iPhone背面タップ用のショートカット(アドレスと合言葉は、追加するときに聞かれる)
 const TEMPLATE_REPO = 'https://github.com/Kota-Sengoku/kakeibo-worker';     // 配布用のWorkerのリポジトリのURL(例 https://github.com/名前/kakeibo-worker)。空のときは、デプロイのボタンを出さない
@@ -1797,6 +1816,8 @@ async function fetchRelease(){
     try{ const t = await (await fetch('worker.js',{cache:'no-store'})).text(); const m = /const VERSION = (\d+)/.exec(t); if(m) workerLatest = +m[1]; }catch(e2){}
   }
 }
+/* 重大な脆弱性などで、公開元が「この版より古いと使わせない」と決めたとき(release.json の workerBlock)。確認できているときだけ、止める */
+const blocked = () => !!(cloud() && cloudInfo && !cloudInfo.error && RELEASE && typeof RELEASE.workerBlock==='number' && RELEASE.workerBlock>0 && (cloudInfo.version||1) < RELEASE.workerBlock);
 const workerRequired = () => !!(workerOutdated() && RELEASE && typeof RELEASE.workerMin==='number' && (cloudInfo.version||1) < RELEASE.workerMin);
 /* データの置き場所(Worker)が、最新の版より古いかどうか。古い版は、/api/info に「version」がない */
 const workerOutdated = () => !!(cloud() && cloudInfo && !cloudInfo.error && workerLatest && (cloudInfo.version||1) < workerLatest);
@@ -1804,11 +1825,12 @@ async function checkWorkerVersion(){
   if(!cloud()) return;
   await loadCloudInfo();
   await fetchRelease();
+  if(blocked()){ render(); return; }
   if(route().p==='sync' && !(document.activeElement && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName))) render();
 }
 const cloudInfoText = () => !cloudInfo ? '「状態を確認」を押してください' : cloudInfo.error ? '確認できませんでした: '+cloudInfo.error : `いまの保存先: ${cloudInfo.backend==='d1'?'Cloudflare(D1)':'Notion'} / D1につながっている: ${cloudInfo.d1?'はい':'いいえ'}${cloudInfo.rows==null?'':` / D1の取引: ${cloudInfo.rows}件`} / プログラムの版: ${cloudInfo.version||1}${workerLatest?(workerOutdated()?`(最新は ${workerLatest}。更新できます)`:'(最新です)'):''}`;
 const setMigStatus = (t) => { const el = document.getElementById('mig-status'); if(el) el.textContent = t; };
-async function loadCloudInfo(){ try{ const r = await cloudFetch('/api/info'); cloudInfo = await r.json(); if(!r.ok) cloudInfo = {error: cloudInfo.error||('エラー '+r.status)}; }catch(e){ cloudInfo = {error:'通信できません'}; } await fetchRelease(); setMigStatus(cloudInfoText()); }
+async function loadCloudInfo(){ try{ const r = await cloudFetch('/api/info'); cloudInfo = await r.json(); if(!r.ok) cloudInfo = {error: cloudInfo.error||('エラー '+r.status)}; }catch(e){ cloudInfo = {error:'通信できません'}; } await fetchRelease(); setMigStatus(cloudInfoText()); if(blocked() || document.getElementById('blk-msg')) render(); }
 async function migrateToD1(){
   if(!confirm('Notionの取引を、Cloudflare(D1)にコピーします。よろしいですか?(Notionのデータは消えません)')) return;
   let cursor = null, total = 0;
@@ -1822,7 +1844,7 @@ async function migrateToD1(){
     await loadCloudInfo(); toast('コピーが終わりました('+total+'件)');
   }catch(e){ setMigStatus('コピーできませんでした: '+(e.message||e)+'(押し直すと、続きからやり直せます)'); }
 }
-const cloudFetch = (path,opt={}) => fetch(S.cloud.url.replace(/\/+$/,'')+path,{...opt,cache:'no-store',headers:{'X-App-Key':S.cloud.key,...(opt.headers||{})}});
+const cloudFetch = (path,opt={}) => (path!=='/api/info' && blocked()) ? Promise.reject(new Error('blocked')) : fetch(S.cloud.url.replace(/\/+$/,'')+path,{...opt,cache:'no-store',headers:{'X-App-Key':S.cloud.key,...(opt.headers||{})}});
 /* クラウド: 初回は全件、以降は「前回から変わった分だけ」取得する(30分に1回は全件を取り直して、ずれを直す) */
 async function loadCloud(manual){
   const needFull = !!manual || !S.cursor || (Date.now()-S.lastFull > 30*60*1000);

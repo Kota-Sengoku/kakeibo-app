@@ -96,3 +96,19 @@ ok(dt < 8000, `攻撃(重いデータ): 3,000件の長い店名・長い本文�
 const rx = 'a'.repeat(100000) + '!';
 const t1 = Date.now(); get('autoCat(' + JSON.stringify({ merchant: rx, raw: rx }) + ')'); const dt1 = Date.now() - t1;
 ok(dt1 < 3000, `攻撃(正規表現の暴走): 長い文字を、自動分類に渡しても、固まらない(${dt1}ms)`);
+
+// 7) 重大な更新(workerBlock): 古いWorkerのときは、送受信を止めて、更新の画面だけを出す
+run("S.cloud={url:'https://w.example',key:'k'}; RELEASE={worker:6,workerMin:2,workerBlock:6}; cloudInfo={version:5,backend:'d1',d1:true,rows:3};");
+ok(get('blocked()') === true && /更新が必要/.test(get('viewBlocked()')) && /Edit code/.test(get('viewBlocked()')), '更新ブロック: 必須の版より古いWorkerのときは、「更新が必要」の画面になる');
+let calls = [];
+ctx.fetch = async (u) => { calls.push(String(u)); return { ok: true, json: async () => ({}), text: async () => '' }; };
+let rejected = false; try { await get("cloudFetch('/api/transactions')"); } catch (e) { rejected = e.message === 'blocked'; }
+const infoOk = await get("cloudFetch('/api/info')").then(() => true, () => false);
+ok(rejected && infoOk && !calls.some(u => u.includes('/api/transactions')), '更新ブロック: 止めているあいだは、データの送受信をしない(状態の確認だけは、通す)');
+run("cloudInfo={version:6,backend:'d1',d1:true,rows:3};");
+ok(get('blocked()') === false, '更新ブロック: 更新して版が足りたら、ブロックは外れる');
+run("cloudInfo={error:'通信できません'};");
+ok(get('blocked()') === false, '更新ブロック: 確認できないとき(電波がない等)は、止めない');
+run("RELEASE={worker:6,workerMin:2,workerBlock:0}; cloudInfo={version:1};");
+ok(get('blocked()') === false, '更新ブロック: workerBlock が 0 なら、古くても止めない(ふだんの状態)');
+run("S.cloud=null; RELEASE=null; cloudInfo=null;");
