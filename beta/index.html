@@ -248,7 +248,8 @@ const DEFAULT_ALLOW = [];     // お小遣いを送ってくれる人(これ以�
 const allowKws = () => { const a = S.settings.allowKw; return Array.isArray(a) ? a : DEFAULT_ALLOW; };
 const INCOME_CATS = ['収入','お小遣い','立替金','その他収入','個人間送金'];     // 収入のカテゴリー(支出のカテゴリーとは別)
 const BASE_CATS = {食費:'#566E85',交通:'#935F3D',日用品:'#4C756E',娯楽:'#827A3F',旅行:'#2F7F86',住居:'#8C5570',サブスク:'#7B6A99',その他:'#6B6585'};
-const CATS = {}, CAT_NAMES = [];      // 表示用(初期のカテゴリー + 自分で追加したもの)。rebuildCats() で作り直す
+const CATS = Object.create(null), CAT_NAMES = [];      // 「constructor」などの名前が、カテゴリーとして見つかってしまわないように、土台のない入れ物にする
+const knownCat = c => typeof c==='string' && (!!CATS[c] || INCOME_CATS.includes(c));      // 表示用(初期のカテゴリー + 自分で追加したもの)。rebuildCats() で作り直す
 const INCOME_COLOR = '#5F7A58';
 const POINT_TYPES = ['投資','ポイント、残高の獲得'];
 const P2P_TYPES = ['受け取った金額','送った金額'];
@@ -269,7 +270,7 @@ const RULES_N = RULES.map(([c,re])=>[c,new RegExp(knRe(re.source),re.flags)]);  
 function rebuildCats(){
   const ordered = {};
   Object.keys(BASE_CATS).filter(k=>k!=='その他').forEach(k=>ordered[k]=BASE_CATS[k]);
-  (S.settings.cats||[]).forEach(c=>{ if(c && c.name && c.name!=='その他' && c.name!=='収入' && !ordered[c.name]) ordered[c.name] = c.color||'#777777'; });
+  (S.settings.cats||[]).forEach(c=>{ if(c && c.name && c.name!=='その他' && c.name!=='収入' && !ordered[c.name]) ordered[c.name] = /^#[0-9a-f]{3,8}$/i.test(String(c.color||'')) ? c.color : '#777777'; });
   ordered['その他'] = BASE_CATS['その他'];
   Object.keys(CATS).forEach(k=>delete CATS[k]); Object.assign(CATS,ordered);
   CAT_NAMES.length = 0; CAT_NAMES.push(...Object.keys(ordered));
@@ -370,7 +371,7 @@ function pickMerchant(raw){
 }
 // 以前の選び方(時刻と1文字だけの行を除く、先頭の行)。いまの店名が、これと同じなら、取り直す
 const oldFirstLine = raw => String(raw||'').split(/\s*\/\s*/).map(x=>x.trim()).find(l=>l && !/^\d{1,2}:\d{2}$/.test(l) && l.length>=2 && /[0-9A-Za-z\u3040-\u30ff\u4e00-\u9fff]/.test(l)) || '';
-const learnedOf = m => { const v = S.learned[mkey(m)] || S.learned[nk(m)] || S.learned[m]; return v==='サブスク' ? null : v; };     // 「サブスク」は、店名だけでは決めない(金額が近いものだけ。subDefs)
+const learnedOf = m => { const v = [mkey(m), nk(m), m].map(k=>Object.prototype.hasOwnProperty.call(S.learned,k) ? S.learned[k] : null).find(x=>x); return (v==='サブスク' || !knownCat(v)) ? null : v; };     // 「サブスク」は、店名だけでは決めない(金額が近いものだけ。subDefs)
 function norm(t){
   const e = S.overlay.edits[t.id] || {};
   const r = {...t, ...e};
@@ -404,7 +405,7 @@ function norm(t){
   const notIncome = ufjDeposit && S.settings.ufjIncomeOnly!==false && !ufjIncomeMatch(r);     // UFJの入金で、収入の言葉を含まないもの
   const group = POINT_TYPES.includes(type)?'point':P2P_TYPES.includes(type)?'p2p':isTransfer?'transfer':notIncome?'nonincome':'main';
   let category, csrc;
-  if(r.category){ category=r.category; csrc='explicit'; }
+  if(r.category && knownCat(r.category)){ category=r.category; csrc='explicit'; }
   else if(v>0){ category = type==='受け取った金額' ? '個人間送金' : /yahoo.?トラベル|ヤフー.?トラベル/i.test(mnorm) ? 'その他収入' : '収入'; csrc='auto'; }      // 人から受け取ったお金は、収入の中の「個人間送金」
   else if(learnedOf(r.merchant)){ category=learnedOf(r.merchant); csrc='learned'; }
   else if(autoCat(r)){ category=autoCat(r); csrc='auto'; }
@@ -581,7 +582,7 @@ function applySubCat(list){
   return list;
 }
 function all(){
-  const del = new Set(S.overlay.deleted), rawAll = [...S.base, ...S.overlay.added].filter(t=>!del.has(t.id));
+  const del = new Set(S.overlay.deleted), rawAll = [...S.base, ...S.overlay.added].filter(t=>t && typeof t==='object' && !del.has(t.id) && !(String(t.id) in Object.prototype));      // 「constructor」などのIDは、使わない(設定の入れ物を、壊されないように)
   buildCanon(rawAll);
   return applySubCat(applyOffsets(dropMailDuplicates(rawAll.map(norm))))
     .sort((a,b)=> (a.day+a.time) < (b.day+b.time) ? 1 : -1);
@@ -608,7 +609,15 @@ function handleConnectLink(){
   const {p,a} = route(); if(p!=='connect'||!a) return false;
   try{
     const o = JSON.parse(decodeURIComponent(escape(atob(a.replace(/-/g,'+').replace(/_/g,'/')))));
-    if(o.url&&o.key){ history.replaceState(null,'',location.pathname+'#/sync'); connectCloud(o.url,o.key); toast('接続しました'); return true; }
+    if(o.url&&o.key){
+      let host = ''; try{ const u = new URL(String(o.url)); if(u.protocol==='https:') host = u.host; }catch(e){}
+      history.replaceState(null,'',location.pathname+'#/sync');
+      if(!host){ toast('接続リンクが正しくありません(https:// ではない接続先は、使えません)'); return false; }
+      // 偽のリンクで、勝手に接続先(データの送り先)を書き換えられないように、必ず確認する
+      const now = cloud() ? ' (いまの接続先: '+(()=>{ try{ return new URL(S.cloud.url).host; }catch(e){ return S.cloud.url; } })()+')' : '';
+      if(!confirm('接続先を「'+host+'」にします。自分で作ったデータの置き場所のときだけ、OKしてください。'+now)) return false;
+      connectCloud(o.url,o.key); toast('接続しました'); return true;
+    }
   }catch(e){ toast('接続リンクが正しくありません'); }
   return false;
 }
@@ -836,7 +845,7 @@ function viewStatsDesk(txs){
   return `<div class="sub" style="font-weight:600">${ymd(today).replace(/-/g,'/')} 時点</div><h1 class="h1" style="margin-top:4px">収支レポート</h1>
   <div class="sumrow"><div class="card"><div class="sub">${m}月の収支</div><div class="v ${cl(iM-eM)}">${sg(iM-eM)}</div></div><div class="card"><div class="sub">${yy}年の収支</div><div class="v ${cl(I-E)}">${sg(I-E)}</div></div><div class="card"><div class="sub">全期間の純増</div><div class="v ${cl(AI-AE)}">${sg(AI-AE)}</div></div></div>
   <div class="rep3">
-    <div class="card"><b>月間 — 支出の内訳</b>${nav('mprev','mnext',`${y}年${m}月`)}${eM?donut(data,eM)+`<div class="legend">${data.map(([k,v])=>`<div><i style="background:${CATS[k]||CATS['その他']}"></i><span>${k}</span><span class="sub">${Math.round(v/eM*100)}%</span><b style="min-width:84px;text-align:right">${yen(v)}</b></div>`).join('')}</div>`:'<div class="empty">この月の支出はありません</div>'}</div>
+    <div class="card"><b>月間 — 支出の内訳</b>${nav('mprev','mnext',`${y}年${m}月`)}${eM?donut(data,eM)+`<div class="legend">${data.map(([k,v])=>`<div><i style="background:${CATS[k]||CATS['その他']}"></i><span>${esc(k)}</span><span class="sub">${Math.round(v/eM*100)}%</span><b style="min-width:84px;text-align:right">${yen(v)}</b></div>`).join('')}</div>`:'<div class="empty">この月の支出はありません</div>'}</div>
     <div class="card"><b>年間 — 月別支出</b>${nav('yprev','ynext',`${yy}年`)}<div style="margin-top:8px">${bars(ev,Array.from({length:12},(_,k)=>k+1),yy===today.getFullYear()?today.getMonth():-1,fut)}</div>
       <div style="margin-top:6px">${ins('収入',yen(I))}${ins('支出',yen(E))}${ins('月平均の支出',yen(avg))}${ins('最も多い月',mxm?`${mxm[0]+1}月 ${yen(mxm[1])}`:'-')}${ins('最も少ない月',mnm?`${mnm[0]+1}月 ${yen(mnm[1])}`:'-')}</div></div>
     <div class="card"><b>全期間 — 累計収支の推移</b><div style="margin-top:14px">${line(cv,months.map(x=>x.slice(2).replace('-','/')))}</div>
@@ -864,7 +873,7 @@ function viewStats(txs,tab){
     const budCard = `<div class="card"><div class="row"><b>予算</b><button class="btn ghost sm" data-act="budget">設定</button></div>${budRows||'<div class="sub" style="margin-top:8px">カテゴリーごとの月の予算を設定すると、使いすぎを確認できます。</div>'}</div>`;
     return head + `
     <div class="nav-month"><button class="icon-btn" data-act="mprev">${svg('left')}</button><b>${y}年${m}月</b><button class="icon-btn" data-act="mnext">${svg('right')}</button></div>
-    <div class="card"><b>カテゴリー別支出</b>${e?donut(data,e)+`<div class="legend">${data.map(([k,v])=>`<div><i style="background:${CATS[k]||CATS['その他']}"></i><span>${k}</span><span class="sub">${Math.round(v/e*100)}%</span><b style="min-width:84px;text-align:right">${yen(v)}</b></div>`).join('')}</div>`:'<div class="empty">この月の支出はありません</div>'}</div>
+    <div class="card"><b>カテゴリー別支出</b>${e?donut(data,e)+`<div class="legend">${data.map(([k,v])=>`<div><i style="background:${CATS[k]||CATS['その他']}"></i><span>${esc(k)}</span><span class="sub">${Math.round(v/e*100)}%</span><b style="min-width:84px;text-align:right">${yen(v)}</b></div>`).join('')}</div>`:'<div class="empty">この月の支出はありません</div>'}</div>
     ${budCard}
     ${incomeCard(mt,'収入の内訳')}
     ${advanceCard(mt,'立替金')}
@@ -1912,7 +1921,7 @@ async function applyLocal(){
   if(!AUTO() || !(o.added.length||o.deleted.length||Object.keys(o.edits).length)) return;
   applying = true;
   try{
-    const res = cloud() ? await cloudFetch('/api/apply',{method:'POST',body:JSON.stringify(o)}) : await fetch('/api/apply',{method:'POST',body:JSON.stringify(o)});
+    const res = cloud() ? await cloudFetch('/api/apply',{method:'POST',body:JSON.stringify(o)}) : await fetch('/api/apply',{method:'POST',headers:{'X-Kakeibo':'1'},body:JSON.stringify(o)});
     if(res.ok){ S.overlay={edits:{},added:S.overlay.added.filter(x=>x._up),deleted:[]}; lastLocalText=null; persist(); }
     else toast('保存に失敗しました');
   }catch(e){ toast('接続できません(変更は端末内に残っています)'); }
