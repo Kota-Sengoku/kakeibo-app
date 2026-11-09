@@ -1484,10 +1484,11 @@ function viewSync(txs){
       <li><button class="btn ghost sm" data-act="mail-copy-script">スクリプトをコピー</button>(あなたのアドレスと合言葉が入った状態でコピーされます)</li>
       <li><a href="https://script.google.com/home/projects/create" target="_blank" rel="noopener" style="color:var(--accent,#2a6ad5)">Apps Scriptを開く</a>(Googleにログイン。「新しいプロジェクト」が開きます)</li>
       <li>中のコードを全部消して、貼り付けて、保存(ディスクのアイコン)</li>
-      <li>上の関数の選択欄で「<b>setup</b>」を選んで、「▶ 実行」を押す</li>
+      <li>上の関数の選択欄で「<b>kakeiboSetup</b>」を選んで、「▶ 実行」を押す</li>
       <li>「承認が必要です」→「権限を確認」→ Googleのアカウントを選ぶ →「このアプリは確認されていません」と出たら、「詳細」→「(安全ではないページ)に移動」→「許可」</li>
-      <li>「実行ログ」に「設定できました」と出れば完了です。過去90日分を入れたいときは、関数「<b>backfill</b>」も実行してください</li>
+      <li>「実行ログ」に「設定できました」と出れば完了です。過去90日分を入れたいときは、関数「<b>kakeiboBackfill</b>」も実行してください</li>
     </ol>
+    <div class="sub" style="margin-bottom:6px">以前にこのスクリプトを入れた人へ: 新しい版に貼り替えたら、もう一度「kakeiboSetup」を1回だけ実行してください(古い自動実行が、自動で片付きます)。</div>
     <div class="sub">対応: 三菱UFJ-JCBデビット、三井住友・楽天・JCB・PayPay・イオン・セゾン・エポスなどのカード。読み取れないメールは、飛ばします。</div></div>`;
   const tapCard = `<div class="card fold ${op('tap')}"><button class="foldhd" data-act="set-toggle" data-k="tap"><b>iPhoneの背面タップ(PayPayの取り込み)</b><span class="chev">›</span></button>
     <div class="sub" style="margin:6px 0 10px">PayPayの支払い・受け取りの画面で、iPhoneの背面を2回(または3回)たたくと、その画面を読み取って、家計簿に追加します。</div>
